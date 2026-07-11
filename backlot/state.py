@@ -547,9 +547,8 @@ def _renders_from_artifacts(project_dir: Path, artifacts: dict) -> list[dict]:
 
     found: list[dict] = []
     for raw_path, declared_by in declared:
-        candidate = Path(raw_path)
-        f = candidate if candidate.is_absolute() else project_dir / raw_path
-        if not f.is_file() or f.suffix.lower() not in MEDIA_VIDEO_EXT:
+        f = _resolve_declared_path(project_dir, raw_path)
+        if f is None or f.suffix.lower() not in MEDIA_VIDEO_EXT:
             continue
         found.append({
             "path": _rel(project_dir, f),
@@ -558,6 +557,28 @@ def _renders_from_artifacts(project_dir: Path, artifacts: dict) -> list[dict]:
             "declared_by": declared_by,
         })
     return found
+
+
+def _resolve_declared_path(project_dir: Path, raw_path: str) -> Optional[Path]:
+    """A declared output path (render_report/publish_log) may be recorded
+    two different ways depending on which convention the writer followed:
+    relative to the project directory (what media/_rel() and the board's
+    /media route expect), or relative to REPO_ROOT per AGENT_GUIDE.md's
+    "output_path under projects/<project-id>/" instruction -- e.g.
+    "projects/social-app-demo/assets/final/composed_output.mp4", which is
+    what a real screen-demo run actually wrote. Naively joining the latter
+    onto project_dir doubles the path into a location that never exists,
+    silently finding nothing. Try both."""
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        return candidate if candidate.is_file() else None
+    by_project_dir = project_dir / candidate
+    if by_project_dir.is_file():
+        return by_project_dir
+    by_repo_root = REPO_ROOT / candidate
+    if by_repo_root.is_file():
+        return by_repo_root
+    return None
 
 
 def _find_poster(project_dir: Path, state: dict) -> Optional[str]:
