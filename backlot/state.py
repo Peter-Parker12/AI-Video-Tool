@@ -522,6 +522,44 @@ def _scan_media(project_dir: Path) -> dict[str, list[dict]]:
     return {"renders": renders, "snapshots": snapshots, "music": music}
 
 
+def _renders_from_artifacts(project_dir: Path, artifacts: dict) -> list[dict]:
+    """Composer/Publisher-declared output paths.
+
+    _scan_media's renders/ + root-*.mp4 scan is a heuristic tuned for the
+    common case; it misses any pipeline that writes its final file
+    elsewhere (e.g. screen-demo's assets/final/composed_output.mp4). The
+    compose stage's render_report.outputs[].path and the publish stage's
+    publish_log entries[].export_path are what the pipeline itself actually
+    recorded as its output -- authoritative regardless of directory
+    convention. Merged into media.renders by the caller, deduped by path.
+    """
+    declared: list[tuple[str, str]] = []  # (path, declared_by)
+    render_report = artifacts.get("render_report") or {}
+    for output in render_report.get("outputs", []) or []:
+        path = output.get("path")
+        if path:
+            declared.append((path, "render_report"))
+    publish_log = artifacts.get("publish_log") or {}
+    for entry in publish_log.get("entries", []) or []:
+        path = entry.get("export_path")
+        if path:
+            declared.append((path, "publish_log"))
+
+    found: list[dict] = []
+    for raw_path, declared_by in declared:
+        candidate = Path(raw_path)
+        f = candidate if candidate.is_absolute() else project_dir / raw_path
+        if not f.is_file() or f.suffix.lower() not in MEDIA_VIDEO_EXT:
+            continue
+        found.append({
+            "path": _rel(project_dir, f),
+            "size": f.stat().st_size,
+            "mtime": f.stat().st_mtime,
+            "declared_by": declared_by,
+        })
+    return found
+
+
 def _find_poster(project_dir: Path, state: dict) -> Optional[str]:
     """Best poster for the library card (image path, or a video path —
     the /thumb endpoint extracts a frame from videos)."""
@@ -597,6 +635,16 @@ def load_board_state(project_dir: Path) -> dict[str, Any]:
     events = read_events(project_dir, limit=250)
     storyboard = _build_storyboard(project_dir, artifacts, events)
     media = _scan_media(project_dir)
+
+    # Fold in whatever compose/publish actually declared as output, for
+    # pipelines whose final file lives outside renders/ or the project
+    # root (see _renders_from_artifacts docstring).
+    seen_paths = {r["path"] for r in media["renders"]}
+    for declared in _renders_from_artifacts(project_dir, artifacts):
+        if declared["path"] not in seen_paths:
+            media["renders"].append(declared)
+            seen_paths.add(declared["path"])
+    media["renders"].sort(key=lambda r: r.get("mtime", 0), reverse=True)
 
     stages = _build_stage_rail(pipeline_meta, checkpoints, history)
 
