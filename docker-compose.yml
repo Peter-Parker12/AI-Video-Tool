@@ -31,5 +31,9 @@ services:
       # the board with no extra wiring.
       - ./projects:/app/projects
       - ./music_library:/app/music_library
+      # OAuth client registrations + issued tokens (mcp_server/oauth.py) —
+      # without this mount, every rebuild/restart forgets every connected
+      # client, forcing everyone to remove and re-add their connector.
+      - ./mcp_state:/app/.mcp_state
     env_file:
       - .env

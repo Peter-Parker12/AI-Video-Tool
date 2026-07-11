@@ -23,12 +23,24 @@ come from ``MCP_OAUTH_STATIC_REDIRECT_URIS`` (comma-separated), left empty
 by default since we don't know your OAuth client's callback URL in advance —
 set it once you do. Either path is gated by the same password prompt:
 client_id is a routing detail here, not the security boundary.
+
+Registered clients and issued tokens are persisted to a JSON file
+(``state_path``) so a container restart/redeploy doesn't silently forget
+every DCR registration a client already made — without this, each restart
+forces everyone connected to remove and re-add the connector, since their
+cached client_id would 404 against a server that no longer remembers it.
+Pending /authorize -> /login handoffs and unredeemed authorization codes are
+NOT persisted: they're short-TTL by design (a few minutes), so losing them
+on restart just means retrying an in-flight login, not a real disruption.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import secrets
 import time
+from pathlib import Path
 from typing import Optional
 
 from mcp.server.auth.provider import (
@@ -87,6 +99,7 @@ class SharedPasswordOAuthProvider:
         static_client_id: str,
         static_client_secret: str,
         static_redirect_uris: list[str],
+        state_path: Optional[Path] = None,
     ) -> None:
         self._shared_password = shared_password
         self._clients: dict[str, OAuthClientInformationFull] = {}
@@ -95,7 +108,15 @@ class SharedPasswordOAuthProvider:
         self._refresh_tokens: dict[str, RefreshToken] = {}
         # authorize() -> /login handoff: txn -> (client, params, expires_at)
         self._pending: dict[str, tuple[OAuthClientInformationFull, AuthorizationParams, float]] = {}
+        self._state_path = state_path
+        self._lock = asyncio.Lock()
 
+        self._load_state()
+
+        # Always (re)built fresh from current env vars, on top of whatever
+        # was loaded from disk — so rotating MCP_OAUTH_CLIENT_SECRET takes
+        # effect on next restart instead of being stuck with a stale
+        # persisted value.
         if static_redirect_uris:
             self._clients[static_client_id] = OAuthClientInformationFull(
                 client_id=static_client_id,
@@ -107,6 +128,46 @@ class SharedPasswordOAuthProvider:
                 client_name="OpenMontage (static)",
             )
 
+    # --- persistence ---
+
+    def _load_state(self) -> None:
+        if self._state_path is None or not self._state_path.is_file():
+            return
+        try:
+            raw = json.loads(self._state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        for client_id, data in raw.get("clients", {}).items():
+            try:
+                self._clients[client_id] = OAuthClientInformationFull.model_validate(data)
+            except Exception:
+                continue
+        for token, data in raw.get("access_tokens", {}).items():
+            try:
+                self._access_tokens[token] = AccessToken.model_validate(data)
+            except Exception:
+                continue
+        for token, data in raw.get("refresh_tokens", {}).items():
+            try:
+                self._refresh_tokens[token] = RefreshToken.model_validate(data)
+            except Exception:
+                continue
+
+    def _save_state(self) -> None:
+        """Caller must hold self._lock — not locked internally so mutating
+        methods can batch a dict update + save under one critical section."""
+        if self._state_path is None:
+            return
+        payload = {
+            "clients": {cid: c.model_dump(mode="json") for cid, c in self._clients.items()},
+            "access_tokens": {t: at.model_dump(mode="json") for t, at in self._access_tokens.items()},
+            "refresh_tokens": {t: rt.model_dump(mode="json") for t, rt in self._refresh_tokens.items()},
+        }
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self._state_path.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        tmp_path.replace(self._state_path)
+
     # --- OAuthAuthorizationServerProvider protocol ---
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -114,7 +175,9 @@ class SharedPasswordOAuthProvider:
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         assert client_info.client_id is not None
-        self._clients[client_info.client_id] = client_info
+        async with self._lock:
+            self._clients[client_info.client_id] = client_info
+            self._save_state()
 
     async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
         self._prune_pending()
@@ -137,7 +200,10 @@ class SharedPasswordOAuthProvider:
         self, client: OAuthClientInformationFull, authorization_code: AuthorizationCode
     ) -> OAuthToken:
         self._auth_codes.pop(authorization_code.code, None)  # one-time use
-        return self._mint_token(client, authorization_code.scopes, subject=authorization_code.subject)
+        async with self._lock:
+            token = self._mint_token(client, authorization_code.scopes, subject=authorization_code.subject)
+            self._save_state()
+        return token
 
     async def load_refresh_token(
         self, client: OAuthClientInformationFull, refresh_token: str
@@ -156,18 +222,23 @@ class SharedPasswordOAuthProvider:
         refresh_token: RefreshToken,
         scopes: list[str],
     ) -> OAuthToken:
-        self._refresh_tokens.pop(refresh_token.token, None)  # rotate on use
-        for tok, at in list(self._access_tokens.items()):
-            if at.client_id == client.client_id:
-                self._access_tokens.pop(tok, None)
-        return self._mint_token(client, scopes or refresh_token.scopes, subject=refresh_token.subject)
+        async with self._lock:
+            self._refresh_tokens.pop(refresh_token.token, None)  # rotate on use
+            for tok, at in list(self._access_tokens.items()):
+                if at.client_id == client.client_id:
+                    self._access_tokens.pop(tok, None)
+            token = self._mint_token(client, scopes or refresh_token.scopes, subject=refresh_token.subject)
+            self._save_state()
+        return token
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         return self._access_tokens.get(token)
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
-        self._access_tokens.pop(token.token, None)
-        self._refresh_tokens.pop(token.token, None)
+        async with self._lock:
+            self._access_tokens.pop(token.token, None)
+            self._refresh_tokens.pop(token.token, None)
+            self._save_state()
 
     # --- helpers used by the /login route handlers below ---
 

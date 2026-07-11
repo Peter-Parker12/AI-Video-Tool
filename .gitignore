@@ -100,3 +100,7 @@ venv/
 
 # MCP server scratch dir (per-call request/result files, self-cleaning)
 .mcp_scratch/
+
+# MCP OAuth client/token store (mounted volume in docker-compose.yml)
+.mcp_state/
+mcp_state/

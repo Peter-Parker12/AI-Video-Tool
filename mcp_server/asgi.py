@@ -18,13 +18,22 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import Response
 
+from lib.paths import REPO_ROOT
 from mcp_server import oauth, resources, tools_invoke, tools_project, tools_registry
+
+# Registered DCR clients + issued tokens survive container restarts via this
+# file — without it, every redeploy forces everyone connected to remove and
+# re-add their connector (see oauth.py's module docstring). Override with
+# MCP_OAUTH_STATE_PATH if the deploy mounts state somewhere other than the
+# repo root (e.g. a dedicated volume).
+DEFAULT_OAUTH_STATE_PATH = REPO_ROOT / ".mcp_state" / "oauth_store.json"
 
 
 def _require_env(name: str) -> str:
@@ -50,12 +59,15 @@ def build_app():
         if uri.strip()
     ]
     public_url = os.environ.get("MCP_PUBLIC_URL", "http://localhost:2384").rstrip("/")
+    state_path_override = os.environ.get("MCP_OAUTH_STATE_PATH")
+    state_path = Path(state_path_override) if state_path_override else DEFAULT_OAUTH_STATE_PATH
 
     provider = oauth.SharedPasswordOAuthProvider(
         shared_password=shared_password,
         static_client_id=static_client_id,
         static_client_secret=static_client_secret,
         static_redirect_uris=static_redirect_uris,
+        state_path=state_path,
     )
 
     mcp = FastMCP(
