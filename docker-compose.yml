@@ -1,0 +1,15 @@
+services:
+  openmontage:
+    build: .
+    container_name: openmontage
+    restart: unless-stopped
+    ports:
+      # host:container — point your Cloudflare Tunnel ingress at
+      # http://localhost:2383 (or http://openmontage:2383 if cloudflared
+      # runs as a container on this same compose network).
+      - "2383:2383"
+    volumes:
+      - ./projects:/app/projects
+      - ./music_library:/app/music_library
+    env_file:
+      - .env
