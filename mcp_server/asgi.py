@@ -22,6 +22,7 @@ from pathlib import Path
 
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import FastMCP
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -107,7 +108,24 @@ def build_app():
 
         return JSONResponse({"ok": True, "app": "openmontage-mcp"})
 
-    return mcp.streamable_http_app()
+    streamable_app = mcp.streamable_http_app()
+
+    # mcp.server.auth.routes applies CORS to the OAuth endpoints only
+    # (/authorize, /token, /register, /revoke, /.well-known/*) — NOT to
+    # /mcp itself (see mcp.server.fastmcp.server.streamable_http_app,
+    # which appends that Route with no CORS wrapper). A browser-based
+    # client that completes the OAuth redirect fine (top-level navigation,
+    # not subject to CORS) can still have its actual MCP calls to /mcp
+    # silently blocked by the browser afterward. Real auth here is the
+    # Bearer token, not cookies, so a permissive origin doesn't weaken
+    # anything a forged Origin header could already bypass.
+    return CORSMiddleware(
+        streamable_app,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["Mcp-Session-Id", "Mcp-Protocol-Version"],
+    )
 
 
 app = build_app()
