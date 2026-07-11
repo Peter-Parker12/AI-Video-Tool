@@ -13,3 +13,23 @@ services:
       - ./music_library:/app/music_library
     env_file:
       - .env
+
+  mcp:
+    build: .
+    container_name: openmontage-mcp
+    restart: unless-stopped
+    command: python -m uvicorn mcp_server.asgi:app --host 0.0.0.0 --port 2384
+    ports:
+      # host:container — second Cloudflare Tunnel ingress rule to
+      # http://localhost:2384 (or http://mcp:2384 if cloudflared runs as a
+      # container on this same compose network). Separate process/port from
+      # the board on purpose — see mcp_server/asgi.py's module docstring.
+      - "2384:2384"
+    volumes:
+      # Same projects/ as the board service above: whatever a connected
+      # Claude session writes via write_stage_checkpoint shows up live on
+      # the board with no extra wiring.
+      - ./projects:/app/projects
+      - ./music_library:/app/music_library
+    env_file:
+      - .env

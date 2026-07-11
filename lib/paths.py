@@ -15,3 +15,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Overridable for staging/screenshots/tests. Everything — checkpoint writes,
 # event attribution, the Backlot board — follows the same root.
 PROJECTS_DIR = Path(os.environ.get("OPENMONTAGE_PROJECTS_DIR") or (REPO_ROOT / "projects"))
+
+
+def safe_project_id(project_id: str) -> str:
+    """Reject a project_id that could escape PROJECTS_DIR via path traversal.
+
+    Shared by backlot/server.py's read endpoints and the MCP server's
+    write-capable tools — a single guard so the two can't drift apart.
+    """
+    if not project_id or any(c in project_id for c in "/\\:") or project_id in (".", ".."):
+        raise ValueError(f"invalid project id: {project_id!r}")
+    return project_id

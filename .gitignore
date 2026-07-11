@@ -97,3 +97,6 @@ venv/
 
 # Backlot local cache (thumbnails)
 .backlot/
+
+# MCP server scratch dir (per-call request/result files, self-cleaning)
+.mcp_scratch/

@@ -88,6 +88,10 @@ class ToolRegistry:
         """Load .env file into os.environ if present, so tools can find API keys."""
         from pathlib import Path
         import os
+        if os.environ.get("OPENMONTAGE_SKIP_DOTENV"):
+            # Set by the MCP server's isolated tool-invocation subprocess; see
+            # tools/base_tool.py's _load_dotenv for why this must stay unset.
+            return
         env_path = Path(__file__).resolve().parent.parent / ".env"
         if not env_path.is_file():
             return

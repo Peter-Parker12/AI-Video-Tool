@@ -29,6 +29,11 @@ def _load_dotenv() -> None:
     even when tools are imported directly without going through the registry.
     Only sets variables that are not already in the environment.
     """
+    if os.environ.get("OPENMONTAGE_SKIP_DOTENV"):
+        # Set by the MCP server's isolated tool-invocation subprocess, which
+        # builds its env explicitly from an allowlist + caller-supplied
+        # provider keys and must never inherit the operator's on-disk .env.
+        return
     env_path = Path(__file__).resolve().parent.parent / ".env"
     if not env_path.is_file():
         return

@@ -14,3 +14,7 @@ openai>=2.44.0         # Videos API support for Sora 2
 fastapi>=0.110
 uvicorn>=0.29
 watchfiles>=0.21
+
+# Remote MCP server (mcp_server/) - lets Claude Code / Claude.ai Custom
+# Connectors drive productions remotely, each with their own provider keys
+mcp>=1.2.0

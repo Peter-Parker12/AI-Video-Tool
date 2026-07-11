@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backlot.state import PROJECTS_DIR, REPO_ROOT, list_projects, load_board_state, summarize_project
+from lib.paths import safe_project_id
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 THUMB_CACHE_DIR = REPO_ROOT / ".backlot" / "thumbs"
@@ -281,9 +282,9 @@ def create_app() -> FastAPI:
 
 
 def _safe_project_dir(project_id: str) -> Path:
-    # ':' rejects Windows drive-relative ids like "C:" (PROJECTS_DIR / "C:"
-    # collapses back to PROJECTS_DIR itself).
-    if any(c in project_id for c in "/\\:") or project_id in (".", ".."):
+    try:
+        safe_project_id(project_id)
+    except ValueError:
         raise HTTPException(status_code=400, detail="invalid project id")
     project_dir = PROJECTS_DIR / project_id
     if not project_dir.is_dir():
