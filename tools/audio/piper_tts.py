@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from lib.paths import PIPER_VOICES_DIR
 from tools.base_tool import (
     BaseTool,
     Determinism,
@@ -38,8 +39,14 @@ class PiperTTS(BaseTool):
         "Install Piper TTS:\n"
         "  pip install piper-tts\n"
         "Or download from https://github.com/rhasspy/piper/releases\n"
-        "Then download a voice model:\n"
-        "  piper --download-dir ~/.piper/models --model en_US-lessac-medium"
+        "The installed `piper` CLI has no auto-download flag -- it only\n"
+        "resolves a bare model name against files already present in its\n"
+        "--data-dir. Download the .onnx + .onnx.json pair yourself into\n"
+        f"{PIPER_VOICES_DIR} (override via the PIPER_VOICES_DIR env var), e.g.:\n"
+        f"  mkdir -p {PIPER_VOICES_DIR} && cd {PIPER_VOICES_DIR}\n"
+        "  curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx\n"
+        "  curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json\n"
+        "Full voice catalog: https://huggingface.co/rhasspy/piper-voices"
     )
     agent_skills = ["text-to-speech"]
 
@@ -96,9 +103,13 @@ class PiperTTS(BaseTool):
     user_visible_verification = ["Listen to generated audio for intelligibility"]
 
     def get_status(self) -> ToolStatus:
-        if shutil.which("piper"):
-            return ToolStatus.AVAILABLE
-        return ToolStatus.UNAVAILABLE
+        if not shutil.which("piper"):
+            return ToolStatus.UNAVAILABLE
+        # The binary alone can't speak without at least one downloaded voice
+        # -- report UNAVAILABLE rather than AVAILABLE-but-guaranteed-to-fail.
+        if not any(PIPER_VOICES_DIR.glob("*.onnx")):
+            return ToolStatus.UNAVAILABLE
+        return ToolStatus.AVAILABLE
 
     def estimate_cost(self, inputs: dict[str, Any]) -> float:
         return 0.0
@@ -124,6 +135,7 @@ class PiperTTS(BaseTool):
             [
                 "piper",
                 "--model", inputs.get("model", "en_US-lessac-medium"),
+                "--data-dir", str(PIPER_VOICES_DIR),
                 "--speaker", str(inputs.get("speaker_id", 0)),
                 "--length-scale", str(inputs.get("length_scale", 1.0)),
                 "--sentence-silence", str(inputs.get("sentence_silence", 0.3)),

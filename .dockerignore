@@ -18,5 +18,8 @@ node_modules/
 remotion-composer/node_modules/
 remotion-composer/out/
 ink-theater/node_modules/
+.piper-voices/
+.mcp_state/
+.mcp_scratch/
 *.log
 .DS_Store

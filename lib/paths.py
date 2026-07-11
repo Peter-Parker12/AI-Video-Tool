@@ -16,6 +16,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # event attribution, the Backlot board — follows the same root.
 PROJECTS_DIR = Path(os.environ.get("OPENMONTAGE_PROJECTS_DIR") or (REPO_ROOT / "projects"))
 
+# Piper voice models (.onnx + .onnx.json pairs). The installed `piper-tts`
+# CLI has no auto-download flag (its --help exposes --data-dir, not the
+# --download-dir the tool's own install_instructions used to claim) -- it
+# only resolves a bare model name against files already present in this
+# directory. tools/audio/piper_tts.py passes --data-dir explicitly so
+# resolution doesn't depend on whatever the caller's cwd happens to be.
+PIPER_VOICES_DIR = Path(os.environ.get("PIPER_VOICES_DIR") or (REPO_ROOT / ".piper-voices"))
+
 
 def safe_project_id(project_id: str) -> str:
     """Reject a project_id that could escape PROJECTS_DIR via path traversal.

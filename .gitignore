@@ -103,4 +103,8 @@ venv/
 
 # MCP OAuth client/token store (mounted volume in docker-compose.yml)
 .mcp_state/
+
+# Piper TTS voice models (.onnx, tens of MB each -- fetched by the
+# Dockerfile at build time, not stored in git)
+.piper-voices/
 mcp_state/

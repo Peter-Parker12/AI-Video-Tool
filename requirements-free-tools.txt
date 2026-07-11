@@ -1,0 +1,6 @@
+# OpenMontage - Free, local (no API key) generation tools
+# Install in addition to requirements.txt. These are CPU-friendly but
+# pull real system dependencies (see Dockerfile) -- piper-tts is light,
+# manim needs cairo/pango and, for MathTex, a LaTeX install.
+piper-tts>=1.2.0
+manim>=0.18.0
