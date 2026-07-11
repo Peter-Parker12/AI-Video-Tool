@@ -19,9 +19,11 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -63,6 +65,19 @@ def build_app():
     state_path_override = os.environ.get("MCP_OAUTH_STATE_PATH")
     state_path = Path(state_path_override) if state_path_override else DEFAULT_OAUTH_STATE_PATH
 
+    # The SDK's DNS-rebinding protection validates Host/Origin against an
+    # allowlist that defaults to EMPTY (nothing passes) once enabled — it's
+    # not "permissive unless configured", it's "421 Misdirected Request for
+    # every request until configured". Derive the allowlist from
+    # MCP_PUBLIC_URL (the real, tunnel-facing host) plus localhost variants
+    # for direct-to-container testing/health checks.
+    public_host = urlparse(public_url).netloc
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=sorted({public_host, "localhost:2384", "127.0.0.1:2384"}),
+        allowed_origins=sorted({public_url, "http://localhost:2384", "http://127.0.0.1:2384"}),
+    )
+
     provider = oauth.SharedPasswordOAuthProvider(
         shared_password=shared_password,
         static_client_id=static_client_id,
@@ -87,6 +102,7 @@ def build_app():
             client_registration_options=ClientRegistrationOptions(enabled=True),
             revocation_options=RevocationOptions(enabled=True),
         ),
+        transport_security=transport_security,
     )
 
     resources.register_resources(mcp)
